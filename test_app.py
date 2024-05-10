@@ -3,6 +3,8 @@ from flask import current_app
 from project import create_app, db
 from project.models import User
 from werkzeug.security import check_password_hash
+from sqlalchemy.sql import text
+
 
 
 class TestWebApp(unittest.TestCase):
@@ -35,8 +37,11 @@ class TestWebApp(unittest.TestCase):
         assert response.status_code == 200
 
     def test_no_access_to_profile(self):
-        # TODO: Check that non-logged-in user should be redirected to /login
-        assert False
+        response = self.client.get('/profile', follow_redirects=True)
+        assert response.status_code == 200  # Successful response after redirects
+        assert '/login' in response.request.path  # Check redirect to the login page
+
+
 
     def test_register_user(self):
         response = self.client.post('/signup', data = {
@@ -72,15 +77,32 @@ class TestWebApp(unittest.TestCase):
         assert check_password_hash(user.password, 'test123')
 
     def test_sql_injection(self):
-        response = self.client.post('/signup', data = {
-            'email' : 'user@test.com"; drop table user; -- ',
-            'name' : 'test user',
-            'password' : 'test123'
-        }, follow_redirects = True)
-        assert response.status_code == 200 
+        malicious_input = 'user@test.com"; drop table user; --'
+        response = self.client.post('/signup', data={
+            'email': malicious_input,
+            'name': 'test user',
+            'password': 'test123'
+        }, follow_redirects=True)
+
+        # Check that the user with the malicious input email is not created
+        user_exists = db.session.query(User.id).filter_by(email=malicious_input).first() is not None
+        assert not user_exists, "SQL Injection was successful; user was created with malicious input!"
+
+        # Optionally, verify the application's response or status code if needed
+        assert response.status_code == 200  # or check for other appropriate response
+
+
+
 
     def test_xss_vulnerability(self):
-        # TODO: Can we store javascript tags in the username field?
-        assert False
+        malicious_script = "<script>alert('XSS')</script>"
+        response = self.client.post('/signup', data={
+            'email': 'user@test.com',
+            'name': malicious_script,  # Attempting to inject JavaScript
+            'password': 'test123'
+        }, follow_redirects=True)
+        assert malicious_script not in response.get_data(as_text=True)
+        assert response.status_code == 200
+
 
 
